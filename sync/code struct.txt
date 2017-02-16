@@ -1,0 +1,30 @@
+1.客制化代码结构：
+  mtk6580
+         |
+         | --->alps
+         | --->lentek   
+                     |--->baseline   (抽出来的文件备份原始文件)
+                     |--->v540   (项目名)
+                                |--->share
+                                |         |--->alps  (项目共用文件)
+                                |         |--->pcb01 (PCB版本共用文件)
+                                |         |          |--->alps  (同一PCB版本共用文件)
+                                |         |          |--->modem (modem版本)
+                                |         |          |--->codegen.dws(GPIO 配置文件)
+                                |         |--->pcb02 
+                                |         |--->ProjectConfig_v540.mk  (项目主make文件) 
+                                |--->ltk01a   (客户名+PCB版本+客户的客户名)
+                                |         |--->alps  (客制化文件)
+                                          
+     客制化代码结构与我们之前的结构去除target目录（用于预制apk），这种方法会影响第一次开机速度，预制apk方法faq上有介绍。
+ 
+2.编译命令：
+    ---进入alps，第一次pull或者checkout出来的代码，先要执行premake命令，成功后再执行make命令：
+       1）,eng版本： source ./premake ../lentek/项目目录名/客户名目录名 + -e
+            user版本： source ./premake  ../lentek/项目目录名/客户名目录名 + -u
+            例如：source ./preview ../lentek/ltk01a  -e 
+ 
+       2), 全编：make -j12 2>&1 | tee build.log
+            编模块：make -j12 [pl|kernel|lk] 2>&1 | tee build.log
+     
+    在执行premake命令前要加上source,否则要再执行lunch + 项目名命令。

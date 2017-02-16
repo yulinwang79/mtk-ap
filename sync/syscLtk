@@ -1,0 +1,624 @@
+#!/usr/bin/perl
+# 
+# Copyright Statement:
+# --------------------
+# This software is protected by Copyright and the information contained
+# herein is confidential. The software may not be copied and the information
+# contained herein may not be used or disclosed except with the written
+# permission of MediaTek Inc. (C) 2010
+# 
+# BY OPENING THIS FILE, BUYER HEREBY UNEQUIVOCALLY ACKNOWLEDGES AND AGREES
+# THAT THE SOFTWARE/FIRMWARE AND ITS DOCUMENTATIONS ("MEDIATEK SOFTWARE")
+# RECEIVED FROM MEDIATEK AND/OR ITS REPRESENTATIVES ARE PROVIDED TO BUYER ON
+# AN "AS-IS" BASIS ONLY. MEDIATEK EXPRESSLY DISCLAIMS ANY AND ALL WARRANTIES,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR NONINFRINGEMENT.
+# NEITHER DOES MEDIATEK PROVIDE ANY WARRANTY WHATSOEVER WITH RESPECT TO THE
+# SOFTWARE OF ANY THIRD PARTY WHICH MAY BE USED BY, INCORPORATED IN, OR
+# SUPPLIED WITH THE MEDIATEK SOFTWARE, AND BUYER AGREES TO LOOK ONLY TO SUCH
+# THIRD PARTY FOR ANY WARRANTY CLAIM RELATING THERETO. MEDIATEK SHALL ALSO
+# NOT BE RESPONSIBLE FOR ANY MEDIATEK SOFTWARE RELEASES MADE TO BUYER'S
+# SPECIFICATION OR TO CONFORM TO A PARTICULAR STANDARD OR OPEN FORUM.
+# 
+# BUYER'S SOLE AND EXCLUSIVE REMEDY AND MEDIATEK'S ENTIRE AND CUMULATIVE
+# LIABILITY WITH RESPECT TO THE MEDIATEK SOFTWARE RELEASED HEREUNDER WILL BE,
+# AT MEDIATEK'S OPTION, TO REVISE OR REPLACE THE MEDIATEK SOFTWARE AT ISSUE,
+# OR REFUND ANY SOFTWARE LICENSE FEES OR SERVICE CHARGE PAID BY BUYER TO
+# MEDIATEK FOR SUCH MEDIATEK SOFTWARE AT ISSUE.
+# 
+# THE TRANSACTION CONTEMPLATED HEREUNDER SHALL BE CONSTRUED IN ACCORDANCE
+# WITH THE LAWS OF THE STATE OF CALIFORNIA, USA, EXCLUDING ITS CONFLICT OF
+# LAWS PRINCIPLES.  ANY DISPUTES, CONTROVERSIES OR CLAIMS ARISING THEREOF AND
+# RELATED THERETO SHALL BE SETTLED BY ARBITRATION IN SAN FRANCISCO, CA, UNDER
+# THE RULES OF THE INTERNATIONAL CHAMBER OF COMMERCE (ICC).
+# 
+use Sys::Hostname;
+my $DEBUG = 0; # enable/disable script debugging message
+
+#space check for build path
+$myPwd = `pwd`;
+$myPwd=~s/\n//gs;
+$result = `pwd`;
+@number = split(" ",$result);
+die "******************************************************************************  \
+You are building in a directory whose absolute path contains a space character: \
+$result \
+Please move your source tree to a path that does not contain any spaces.        \
+******************************************************************************  \
+Directory names containing spaces not supported\n" if($#number != 0);
+@keywords = ('\[','\]','\(','\)','\{','\}');
+foreach $k (@keywords)
+{
+@number = split($k,$result);
+die "******************************************************************************  \
+You are building in a directory whose absolute path contains a special character: \
+$result \
+Please move your source tree to a path that does not contain \"$k\".        \
+******************************************************************************  \
+Directory names containing spaces not supported\n" if($#number != 0);
+}
+
+
+
+my $product = "";
+$project = "";
+# lentek
+$lentek_project="";
+$lentek_customer="";
+$lentek_config_file = "";
+$lentek_pcb_verno="";
+$lentek_pcb_modem="";
+$lentek_pcb_dws="";
+$lentek_tablet="no";
+$base_customer = "";
+
+@featureKeys = ();
+
+`echo failure>LTK_SYSNC`;
+
+($#ARGV < 1) && &Usage;
+$tee = "FALSE";
+
+
+@orgARGV = @ARGV;
+$mOpt;
+
+print("$ARGV[0],$ARGV[1]");
+$ENV{"LTK_SYSNC"} = "failure";
+
+
+while ($#ARGV != -1)
+{
+  if ($ARGV[0] =~ /^-h|help/) 
+  {
+    &Usage;
+  }
+  elsif ($ARGV[0] =~ /^-e/) 
+  {
+    $mOpt = "eng";
+	print("mOpt eng=$mOpt\n");
+  }
+  elsif ($ARGV[0] =~ /^-u/) 
+  {
+    $mOpt = "user";
+	print("mOpt user=$mOpt\n");
+  }
+  else
+  {
+  		if(-e "$ARGV[0]/basecustomer.mk")
+			{
+			  open (FILE_HANDLE, "<$ARGV[0]/basecustomer.mk") or die "cannot open basecustomer.mk\n";
+				while (<FILE_HANDLE>) 
+				{
+					if(!/^#/)
+					{
+						if (/^(\S+)\s*=\s*([^\n\t\r\f]+)/) 
+						{
+							#print "==1==left:${1}===right:${2}===\n";
+							if("basecustomer" eq $1)
+							{
+								$base_customer = $2; # . $current_time_str;
+								print "\n" . $base_customer . "---------\n";
+							}
+						}
+					}
+				}
+				close FILE_HANDLE;
+			}
+
+      if ( -e  "$ARGV[0]/lentek.mk" || $base_customer  ne "") {
+
+#        print "$ARGV[0]/lentek.mk exist !\n";
+        my @custom_path = split("/", $ARGV[0]);
+        $path_count = @custom_path;
+        $lentek_project = @custom_path[$path_count-2];
+        $lentek_customer = @custom_path[$path_count-1];
+        $project = createProjectFeature();
+      #shift(@ARGV);
+	  }
+    print "=={ project:   $project }==\n=={ lentek_project:   $lentek_project }==\n=={ lentek_customer:   $lentek_customer }==\n";
+
+    die "Can NOT recognize project Makefile "
+        . "device/hexing/${project}/ProjectConfig.mk from command\n"
+    if (!-e "device/hexing/${project}/ProjectConfig.mk");
+    #shift(@ARGV);
+  }
+  shift(@ARGV);
+}
+# ==============================================================================================
+# lentek ./makeMtk emulator:ltk remake
+sync_lentek_project();
+
+$ENV{"MTK_PROJECT"}=$project;
+
+`echo $project>MTK_PROJECT`;
+$ENV{"LTK_SYSNC"}="success";
+`echo success>LTK_SYSNC`;
+$ENV{"LTK_LUNCH"}="full_".$project."-".$mOpt;
+`echo $mOpt>LTK_LUNCH`;
+
+sub Usage
+{
+  warn << "__END_OF_USAGE";
+Usage: (makeMtk|mk) [options] project actions [modules]
+
+Options:
+  -e: eng version
+  -u: usr version
+  -h, -help     : Print this message and exit.
+
+Projects:
+  one of available projects.
+
+Example:
+  ./premake ../lentek/v540/ltk01a -e
+  ./premake ../lentek/v540/ltk01a -u
+__END_OF_USAGE
+
+  exit 1;
+}
+
+sub p_system
+{
+  my ($cmd) = @_;
+  my ($debugp) = 0;
+  my $result;
+  ($debugp != 0) && print("$cmd\n");
+  ($performanceChk == 1) && print &CurrTimeStr . " system $cmd\n";
+  $result = system("$cmd");
+  ($performanceChk == 1) && print &CurrTimeStr . " exit $cmd\n";
+  return $result;
+}
+
+sub createProjectFeature
+{
+    my $customProject="";
+    my $count = @featureKeys;
+    my @projects;
+	  if ($DEBUG)
+	  {
+	  print("createProjectFeature......\n");
+	  }
+    if($count>0)
+    {
+            $customProject=$featureValues{"CUSTOM_PROJECT"};
+            return $customProject;
+    }
+    $lentek_config_file = "../lentek/${lentek_project}/${lentek_customer}/lentek.mk";   
+    $lentek_project_file = "../lentek/${lentek_project}/share/ProjectConfig_${lentek_project}.mk";
+
+    die "Can NOT open project Makefile $lentek_project_file\n" if (!-e "$lentek_project_file");
+    push(@projects,$lentek_project_file);
+    if( $base_customer  eq "")
+    {
+    	die "Can NOT open project Makefile $lentek_config_file\n" if (!-e "$lentek_config_file");
+      push(@projects,$lentek_config_file); 
+    }
+    else
+    {
+      $lentek_base_config_file = "../lentek/${lentek_project}/${base_customer}/lentek.mk";   
+      die "Can NOT open project Makefile $lentek_base_config_file\n" if (!-e "$lentek_base_config_file");
+      push(@projects,$lentek_base_config_file);    
+      if (-e "$lentek_config_file")
+      {
+      	push(@projects,$lentek_config_file);           
+      }      	    
+    }
+    foreach $prj (@projects) 
+    {
+    	open (FILE_HANDLE, "<$prj") or die "cannot open $prj\n";
+    	while (<FILE_HANDLE>) 
+    	{
+    		if(!/^#/)
+    	{
+    			if (/^(\S+)\s*=\s*([^\n\t\r\f]+)/) 
+    			{
+    				#print "==1==left:${1}===right:${2}===\n";
+    				if(!exists($featureValues{$1}))
+    				{
+    					push(@featureKeys, "${1}");
+    				}
+    				$featureValues{$1} = $2;
+    			}
+    			else
+    			{
+    				chomp($_);
+    				$_ = $_ . " ";
+    				if (/^(\S+)\s*=\s*([^\n\t\r\f]+)/) 
+    				{
+    					#print "==2==left:${1}===right:${2}===\n";
+    					if(!exists($featureValues{$1}))
+    					{
+    						push(@featureKeys, "${1}");
+    					}
+    					$featureValues{$1} = $2;
+    				}
+    				else
+    				{
+    					push(@featureKeys, $_."\n");
+    				}
+    			}
+    		}
+    		else
+    		{
+    			push(@featureKeys, $_);
+    		}
+    	}
+    	close FILE_HANDLE;
+    }
+    $customProject=$featureValues{"CUSTOM_PROJECT"};
+    $count = @featureKeys;
+
+    return $customProject;
+}
+sub sync_lentek_project()
+{
+
+if (($lentek_project)&&($lentek_customer))
+{
+        createProjectFeature();	
+	if(exists($featureValues{"CUSTOM_PRODUCT_TABLET"}))
+	{
+		$lentek_tablet = $featureValues{"CUSTOM_PRODUCT_TABLET"};
+	}
+		$lentek_pcb_verno=$featureValues{"CUSTOM_PCB_VERNO"};
+    print "rsync lentek project pcb: $lentek_pcb_verno\n";
+    system("rsync -avr --ignore-times --exclude=.svn --exclude=Thumbs.db --exclude=.git --exclude=.cvs ../lentek/baseline/alps/ ./ > ltk_cust_sync.log 2>&1");
+    system("rsync -avr --ignore-times --exclude=.svn --exclude=Thumbs.db --exclude=.git --exclude=.cvs ../lentek/${lentek_project}/share/alps/ ./ >> ltk_cust_sync.log 2>&1");
+    system("rsync -avr --ignore-times --exclude=.svn --exclude=Thumbs.db --exclude=.git --exclude=.cvs ../lentek/${lentek_project}/share/${lentek_pcb_verno}/alps/ ./ >> ltk_cust_sync.log 2>&1");
+		if (-e "$myPwd/../lentek/${lentek_project}/${lentek_customer}/codegen.dws")
+		{
+			$lentek_pcb_dws = "$myPwd/../lentek/${lentek_project}/${lentek_customer}/codegen.dws";
+		}
+		else
+		{
+			if (-e "$myPwd/../lentek/${lentek_project}/${base_customer}/codegen.dws")
+			{
+				$lentek_pcb_dws = "$myPwd/../lentek/${lentek_project}/${base_customer}/codegen.dws";
+			}
+			else
+			{ 
+				if (-e "$myPwd/../lentek/${lentek_project}/share/${lentek_pcb_verno}/codegen.dws")
+				{
+					$lentek_pcb_dws = "$myPwd/../lentek/${lentek_project}/share/${lentek_pcb_verno}/codegen.dws";		
+				}
+			}
+		}
+		if (-e $lentek_pcb_dws)
+		{
+				print "set dws: $lentek_pcb_dws\n";	
+				
+				
+
+				p_system("rm -rf ./vendor/mediatek/proprietary/custom/$project/kernel/dct/dct/codegen.dws");
+				p_system("ln -s $lentek_pcb_dws ./vendor/mediatek/proprietary/custom/$project/kernel/dct/dct/codegen.dws");
+
+
+				p_system("rm -rf ./kernel-3.18/drivers/misc/mediatek/mach/mt6580/$project/dct/dct/codegen.dws");
+				p_system("ln -s $lentek_pcb_dws ./kernel-3.18/drivers/misc/mediatek/mach/mt6580/$project/dct/dct/codegen.dws");
+
+				p_system("rm -rf ./vendor/mediatek/proprietary/bootable/bootloader/preloader/custom/$project/dct/dct/codegen.dws");
+				p_system("ln -s $lentek_pcb_dws ./vendor/mediatek/proprietary/bootable/bootloader/preloader/custom/$project/dct/dct/codegen.dws");
+
+				p_system("rm -rf ./vendor/mediatek/proprietary/bootable/bootloader/lk/target/$project/dct/dct/codegen.dws");
+				p_system("ln -s $lentek_pcb_dws ./vendor/mediatek/proprietary/bootable/bootloader/lk/target/$project/dct/dct/codegen.dws");
+		
+		}
+		if($base_customer ne "")
+		{
+			system("rsync -avr --ignore-times --exclude=.svn --exclude=Thumbs.db --exclude=.git --exclude=.cvs ../lentek/${lentek_project}/${base_customer}/alps/ ./ >> ltk_cust_sync.log 2>&1");
+		}
+    system("rsync -avr --ignore-times --exclude=.svn --exclude=Thumbs.db --exclude=.git --exclude=.cvs ../lentek/${lentek_project}/${lentek_customer}/alps/ ./ >> ltk_cust_sync.log 2>&1");
+
+	if(exists($featureValues{"CUSTOM_PCB_MODEM"}))
+	{
+		my $custom_modem = 	$featureValues{"CUSTOM_PCB_MODEM"};			
+	    print "set modem: $custom_modem\n";	
+		$lentek_pcb_modem="../lentek/${lentek_project}/share/${lentek_pcb_verno}/${custom_modem}/";
+		p_system("mkdir -p ./vendor/mediatek/proprietary/custom/$project/modem") if (!-d "./vendor/mediatek/proprietary/custom/$project/modem");
+		p_system("rm -rf ./vendor/mediatek/proprietary/custom/$project/modem/$custom_modem");
+		p_system("ln -s ../../../../../../$lentek_pcb_modem ./vendor/mediatek/proprietary/custom/$project/modem/$custom_modem");
+		$featureValues{"CUSTOM_MODEM"} = $custom_modem;
+
+	}
+
+	 #print "===================================================\n";
+	 @reportFeatrueKey = qw(
+	 		MTK_BT_SUPPORT 
+	 		MTK_FM_SUPPORT 
+	 		MTK_GPS_SUPPORT 
+	 		CUSTOM_KERNEL_ACCELEROMETER 
+			CUSTOM_KERNEL_MAGNETOMETER 
+			CUSTOM_KERNEL_ALSPS 
+			CUSTOM_KERNEL_GYROSCOPE 
+			CUSTOM_KERNEL_MATV
+			CUSTOM_KERNEL_EX_ATV 
+			MTK_WLAN_SUPPORT 
+			CUSTOM_KERNEL_MAIN_IMGSENSOR 
+			CUSTOM_KERNEL_SUB_IMGSENSOR 
+		);
+	 @reportFeatrueName = qw(
+	 		蓝牙 
+	 		FM 
+	 		GPS 
+	 		3D传感器 
+			地磁 
+			环境/接近 
+			陀螺仪 
+			MTK电视 
+			NMI电视
+			WIFI 
+			主摄像头 
+			副摄像头 
+		);
+    $sw_feature_list_name = sprintf("sw_feature_list.txt");
+    open (sw_feature_list_handle, '>', "./$sw_feature_list_name");
+   for($i=0;$i< @reportFeatrueKey; $i++)
+   {
+   		if(exists $featureValues{@reportFeatrueKey[$i]})
+   		{
+   	      if($featureValues{@reportFeatrueKey[$i]} eq "yes")
+   	      {
+	   				print sw_feature_list_handle "@reportFeatrueName[$i]			=>支持\n";      	      
+   	      }
+   	      elsif($featureValues{@reportFeatrueKey[$i]} eq "no" || $featureValues{@reportFeatrueKey[$i]} eq " ")
+   	      {  
+   	      	print sw_feature_list_handle "@reportFeatrueName[$i]			=>不支持\n";     
+	}
+	else
+	{
+   	      	print sw_feature_list_handle "@reportFeatrueName[$i]			=>$featureValues{@reportFeatrueKey[$i]}\n";        	      
+	}
+}
+   }
+   open (FILE_MEMORY_HANDLE, "<./vendor/mediatek/proprietary/bootable/bootloader/preloader/custom/$project/inc/custom_MemoryDevice.h") or die "Configure memory unsuccessful!!!!\n";
+   while (<FILE_MEMORY_HANDLE>) 
+{
+		if(/^\s*#define\s*\CS_PART_NUMBER\[(\d)\]\s*([^\n\r]+)/)
+         {
+				print sw_feature_list_handle "FLASH[$1]    =>$2\n";
+		}
+	 }
+   close FILE_MEMORY_HANDLE;
+   close sw_feature_list_handle;
+	 @releaseFeatrueKey = qw(
+	 		MTK_BT_SUPPORT 
+	 		MTK_FM_SUPPORT 
+	 		CUSTOM_KERNEL_ACCELEROMETER 
+			#CUSTOM_KERNEL_MAGNETOMETER 
+			#CUSTOM_KERNEL_ALSPS 
+			#CUSTOM_KERNEL_GYROSCOPE 
+			CUSTOM_KERNEL_MATV 
+			CUSTOM_KERNEL_EX_ATV
+			MTK_WLAN_SUPPORT 
+			MTK_GPS_SUPPORT
+ 
+		);
+	 @releaseFeatrueName = qw(
+	 		BT 
+	 		FM 
+	 		GS 
+			#MT 
+			#AP 
+			#GY 
+			ATV 
+			ATV 
+			WIFI 
+			GPS
+		);
+		
+	 $custom_verno = $featureValues{"CUSTOM_BUILD_VERNO"};		
+	 if(!exists $featureValues{"CUSTOM_VERNO_SHOW_DEVICE_INFO"} || $featureValues{"CUSTOM_VERNO_SHOW_DEVICE_INFO"} ne "no")
+	 {
+	 
+
+   for($i=0;$i< @releaseFeatrueKey; $i++)
+   {
+   		if(exists $featureValues{@releaseFeatrueKey[$i]})
+   		{
+   	      if($featureValues{@releaseFeatrueKey[$i]} ne "no" && $featureValues{@releaseFeatrueKey[$i]} ne " ")
+   	      {  
+   	      	$custom_verno = $custom_verno . _ .@releaseFeatrueName[$i];        	      
+   	      }
+   		}
+   }
+   if(exists $featureValues{"GEMINI"})
+   	{
+   	      if($featureValues{"GEMINI"} ne "no" && $featureValues{"GEMINI"} ne " ")
+   	      {  
+   	      }
+   	      else
+   	      {
+   	      	$custom_verno = $custom_verno . _ ."SSIM";    
+   	      }
+   	}
+   if(exists $featureValues{"CUSTOM_CAMERA_DEVICE_NAME"} && $featureValues{"CUSTOM_CAMERA_DEVICE_NAME"} ne " ")
+   {
+  	  	$custom_verno = $custom_verno . _ .$featureValues{"CUSTOM_CAMERA_DEVICE_NAME"};   						 
+   }
+   else
+   {
+	   if(exists $featureValues{"CUSTOM_KERNEL_MAIN_IMGSENSOR"} && $featureValues{"CUSTOM_KERNEL_MAIN_IMGSENSOR"} ne " ")
+	 	 {
+	      if(exists $featureValues{"CUSTOM_KERNEL_MAIN_IMGSENSOR"} && $featureValues{"CUSTOM_KERNEL_SUB_IMGSENSOR"} ne " ")
+	      {
+	      	$custom_verno = $custom_verno . _ ."DC";     
+	         }
+	         else
+	         {
+	  	   	$custom_verno = $custom_verno . _ ."SC";   						
+	         }
+	
+		}
+
+	}
+	}
+	 ($sec_log,$min_log,$hour_log,$mday_log,$mon_log,$year_log,$wday_log,$yday_log,$isdst_log) = localtime(time);
+   $current_time_str = sprintf("%04d%02d%02d_%02d%02d", $year_log + 1900, $mon_log +1, $mday_log, $hour_log, $min_log);
+#   my $week=0;
+#   my $num = $yday_log + 1; 
+#   if ($num % 7 == 0) {
+#		 $week = $num / 7;
+#   } else {
+#      $week  = int($num / 7 + 1);
+#	 }
+#   $current_week_str = sprintf("%02d%02d", $year_log - 100, $week);
+
+   $current_week_str = `date +%y%U`;
+   $current_week_str =~ s/\n//igs;
+   $current_week_str = int($current_week_str + 1);
+   if(exists $featureValues{"CUSTOM_VERNO_ADD_BUILD_WEEK"} && $featureValues{"CUSTOM_VERNO_ADD_BUILD_WEEK"} eq "yes")
+   {
+  	  	$custom_verno = $custom_verno . _ .$current_week_str;   						 
+   } 
+	 if(exists $featureValues{"CUSTOM_DEVICE_EXPAND"} && $featureValues{"CUSTOM_DEVICE_EXPAND"} ne " ")
+   {
+  	  	$custom_verno = $custom_verno . _ .$featureValues{"CUSTOM_DEVICE_EXPAND"};   						 
+   }
+
+
+
+	 $featureValues{"CUSTOM_BUILD_VERNO"}=$custom_verno . _ .$featureValues{"CUSTOM_SW_VERNO"};
+	 
+	 push(@featureKeys, "CUSTOM_BUILD_PACKAGE");
+	 $featureValues{"CUSTOM_BUILD_PACKAGE"} = $featureValues{"CUSTOM_BUILD_VERNO"} . _ . $current_time_str;
+   if(exists $featureValues{"CUSTOM_BUILD_VERNO_FIXED"} && $featureValues{"CUSTOM_BUILD_VERNO_FIXED"} ne " ")
+	 {
+		if(exists $featureValues{"CUSTOM_BUILD_VERNO_FIXED_ADD_BUILD_TIME"} && $featureValues{"CUSTOM_BUILD_VERNO_FIXED_ADD_BUILD_TIME"} eq "yes")
+		{
+			$featureValues{"CUSTOM_BUILD_VERNO"} = $featureValues{"CUSTOM_BUILD_VERNO_FIXED"} . _ . $current_time_str;
+		}
+		else
+		{
+			$featureValues{"CUSTOM_BUILD_VERNO"} = $featureValues{"CUSTOM_BUILD_VERNO_FIXED"};
+		}
+	 }
+
+#   $featureValues{"MTK_BUILD_VERNO"}=$featureValues{"CUSTOM_BUILD_VERNO"};	 
+
+
+	 if(exists $featureValues{"LTK_CUSTOMER_VERNO"} && $featureValues{"LTK_CUSTOMER_VERNO"} ne " ")
+	 {
+            if(exists $featureValues{"LTK_CUSTOMER_VERNO_ADD_BUILD_TIME"} && $featureValues{"LTK_CUSTOMER_VERNO_ADD_BUILD_TIME"} eq "yes")
+            {
+            	if(exists $featureValues{"CUSTOMER_VERNO_ONLY_HAS_DATE"} && $featureValues{"CUSTOMER_VERNO_ONLY_HAS_DATE"} eq "yes")
+            	{
+            		$current_time_str = sprintf("%04d_%02d_%02d", $year_log + 1900, $mon_log +1, $mday_log);
+            	}
+            	$featureValues{"LTK_CUSTOMER_VERNO"} = $featureValues{"LTK_CUSTOMER_VERNO"} . _ . $current_time_str;
+            }
+            if(exists $featureValues{"LTK_CUSTOMER_VERNO_ADD_BUILD_WEEK"} && $featureValues{"LTK_CUSTOMER_VERNO_ADD_BUILD_WEEK"} eq "yes")
+            {
+            	$featureValues{"LTK_CUSTOMER_VERNO"} = $featureValues{"LTK_CUSTOMER_VERNO"} . _ . $current_week_str;
+            }
+
+            if(exists $featureValues{"LTK_CUSTOMER_VERNO_ADD_EXPAND"} && $featureValues{"LTK_CUSTOMER_VERNO_ADD_EXPAND"} ne " ")
+            {
+            	$featureValues{"LTK_CUSTOMER_VERNO"} = $featureValues{"LTK_CUSTOMER_VERNO"} . _ . $featureValues{"LTK_CUSTOMER_VERNO_ADD_EXPAND"};
+            }		
+            $featureValues{"MTK_BUILD_VERNO"}=$featureValues{"CUSTOM_BUILD_VERNO"};	
+            $featureValues{"CUSTOM_BUILD_VERNO"}=$featureValues{"LTK_CUSTOMER_VERNO"};
+	 }
+	 else
+	 {
+	    if(!exists($featureValues{LTK_CUSTOMER_VERNO}))
+	    {
+                push(@featureKeys, "LTK_CUSTOMER_VERNO");
+            }
+           $featureValues{"LTK_CUSTOMER_VERNO"}=$featureValues{"MTK_BUILD_VERNO"};
+           $featureValues{"MTK_BUILD_VERNO"}=$featureValues{"CUSTOM_BUILD_VERNO"};	
+	 }
+            if(exists $featureValues{"CUSTOM_BUILD_VERNO_EXT"} && $featureValues{"CUSTOM_BUILD_VERNO_EXT"} ne " ")
+            {
+            	$featureValues{"MTK_BUILD_VERNO"} = $featureValues{"CUSTOM_BUILD_VERNO_EXT"};
+            }		
+	 
+	  if(exists $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} && $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} ne " ")
+	 {
+		if(exists $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER_BUILD_TIME"} && $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER_BUILD_TIME"} eq "yes")
+		{
+			if(exists $featureValues{"CUSTOMER_VERNO_ONLY_HAS_DATE"} && $featureValues{"CUSTOMER_VERNO_ONLY_HAS_DATE"} eq "yes")
+			{
+				$current_time_str = sprintf("%04d_%02d_%02d", $year_log + 1900, $mon_log +1, $mday_log);
+			}
+			$featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} = $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} . _ . $current_time_str;
+		}
+		if(exists $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER_EXPAND"} && $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER_EXPAND"} ne " ")
+		{
+			$featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} = $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER"} . _ . $featureValues{"LTK_CUSTOMER_INTERNAL_SW_VER_EXPAND"};
+		}		
+	 }
+	 push(@featureKeys, "CUSTOM_BUILD_GIT_COMMIT");
+   if (-e "../.git/")
+   {
+       my @commitall = readpipe("git log -1 |grep commit");
+       $commit  =@commitall[0];
+       $commit =~ s/commit//igs;
+       $commit =~ s/^\s+|\s+$//g;
+       $featureValues{"CUSTOM_BUILD_GIT_COMMIT"} = $commit;
+	 }
+	 else
+	 {
+	     $featureValues{"CUSTOM_BUILD_GIT_COMMIT"} = "Not_In_Control_Code"
+	 }
+
+
+	 open (LTK_CFG_HANDLE, ">./vendor/mediatek/proprietary/factory/inc/cust_lentek_cfg.h") or die "cannot open cust_lentek_cfg.H\n";
+	 $tmpOutput = "#define CUSTOM_BUILD_PACKAGE " . "\"" .$featureValues{"CUSTOM_BUILD_PACKAGE"} . "\"" . "\n";
+	 $tmpOutput .= "#define CUSTOM_BUILD_GIT_COMMIT " . "\"" .$featureValues{"CUSTOM_BUILD_GIT_COMMIT"} . "\"" . "\n";
+	 print LTK_CFG_HANDLE $tmpOutput;
+	 close LTK_CFG_HANDLE;
+
+	 $write_tempprjfile = "device/hexing/${project}/ProjectConfig_temp.mk";
+   die "can NOT open $write_tempprjfile:$!" if ( ! open OUT_FILE, ">$write_tempprjfile");
+       	 
+   $count = @featureKeys;
+   $i = 0;
+   while($i < $count)
+{
+   		$key = @featureKeys[$i++];
+   		#print "==3==left:$key===right:$featureValues{$key}===\n";
+   		if(exists $featureValues{$key})
+  	{
+   			# if($featureValues{$key} ne " ")
+   			{
+   				print OUT_FILE "${key} = $featureValues{$key}\n";
+   			}
+   			delete $featureValues{$key};
+
+	}
+	else
+	{
+   			print OUT_FILE "${key}";
+   	}
+   }
+	 close OUT_FILE;
+	 p_system("cp -f $write_tempprjfile device/hexing/${project}/ProjectConfig.mk");
+}
+
+if (($lentek_project)&&($lentek_customer))
+{
+	 $ENV{"LTK_PRJ"} = $lentek_project;
+	 $ENV{"LTK_CUST"} = $lentek_customer;
+}
+}
